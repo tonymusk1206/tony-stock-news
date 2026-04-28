@@ -1,35 +1,48 @@
-let mockData = null; // Global data object received from python backend
+let mockData = null; 
 
 document.addEventListener("DOMContentLoaded", () => {
+    console.log("Tony's Stock Dashboard: DOMContentLoaded");
+    const statusDisplay = document.getElementById('base-date-display');
+    if (statusDisplay) statusDisplay.innerText = '상태: 자바스크립트 로드됨 (연결 시도 중...)';
+    
     updateTime();
     fetchMarketData();
 });
 
 async function fetchMarketData() {
     const mainContent = document.querySelector('.main-content');
+    const statusDisplay = document.getElementById('base-date-display');
     const originalContent = mainContent.innerHTML;
     
-    // 로딩 UI 표시
+    // 로딩 UI 표시 (더 강력하게)
     mainContent.innerHTML = `
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 50vh; color: white;">
-            <div class="pulse-dot" style="width: 50px; height: 50px; box-shadow: 0 0 20px var(--accent-brand); background: var(--accent-brand); animation-duration: 1.5s; margin-bottom: 2rem;"></div>
-            <h2 style="font-family: var(--font-heading); font-size: 1.8rem; text-shadow: 0 0 10px rgba(59, 130, 246, 0.5);">통합 실시간 시장 데이터 로딩 중</h2>
-            <p style="color: var(--text-secondary); margin-top: 10px;">Yahoo Finance 실시간 서버와 통신 중입니다. (최대 10초 소요 가능)</p>
+        <div id="loading-overlay" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 60vh; color: white; background: rgba(0,0,0,0.2); border-radius: 20px;">
+            <div class="pulse-dot" style="width: 60px; height: 60px; box-shadow: 0 0 25px var(--accent-brand); background: var(--accent-brand); animation-duration: 1.2s; margin-bottom: 2rem;"></div>
+            <h2 style="font-family: var(--font-heading); font-size: 2rem; text-shadow: 0 0 15px rgba(59, 130, 246, 0.6);">통합 네트워크 데이터 분석 중...</h2>
+            <p style="color: var(--text-secondary); margin-top: 15px; font-size: 1.1rem;">Render 서버 및 Yahoo Finance와 통신을 시작했습니다. (예상 대기: 5~15초)</p>
+            <div style="margin-top: 2rem; padding: 10px 20px; background: rgba(255,255,255,0.05); border-radius: 30px; font-size: 0.9rem; color: #94a3b8;">
+                Network: Checking /api/market-data
+            </div>
         </div>
     `;
     
     try {
+        console.log("Fetching from: /api/market-data");
         const res = await fetch('/api/market-data');
-        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        
+        if (!res.ok) {
+            throw new Error(`서버 응답 오류 (HTTP ${res.status}) - 서버가 아직 준비되지 않았거나 경로가 잘못되었습니다.`);
+        }
         
         mockData = await res.json();
+        console.log("Data received:", mockData);
         
-        if (mockData.error) throw new Error(mockData.error);
+        if (mockData.error) throw new Error(`백엔드 내부 오류: ${mockData.error}`);
         
-        // 원본 UI 레이아웃 복원
+        // 데이터 로드 성공 시
         mainContent.innerHTML = originalContent;
+        if (statusDisplay) statusDisplay.innerText = `업데이트: ${mockData.baseDate || '성공'}`;
         
-        // 컴포넌트 데이터 렌더링
         renderMarkets();
         renderSectors();
         renderCompanies();
@@ -37,13 +50,19 @@ async function fetchMarketData() {
         renderQuotes();
         renderYoutube();
         
-        document.getElementById('base-date-display').innerText = '상태: 백엔드 연결 확인됨';
     } catch (err) {
-        console.error(err);
+        console.error("Fetch Error:", err);
+        if (statusDisplay) statusDisplay.innerText = '상태: 연결 실패';
+        
         mainContent.innerHTML = `
-            <div style="padding: 3rem; background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; border-radius: 16px; text-align: center; color: #fca5a5;">
-                <h2 style="margin-bottom: 1rem;">백엔드 데이터 통신 실패</h2>
-                <p>파이썬 서버(app.py)가 5000번 포트에서 가동 중인지 확인해 주세요. <br>상세 오류: ${err.message}</p>
+            <div style="padding: 4rem; background: rgba(239, 68, 68, 0.08); border: 2px dashed rgba(239, 68, 68, 0.3); border-radius: 24px; text-align: center; color: #fca5a5; max-width: 800px; margin: 2rem auto;">
+                <div style="font-size: 3rem; margin-bottom: 1.5rem;">⚠️</div>
+                <h2 style="margin-bottom: 1rem; color: #ef4444; font-family: var(--font-heading);">데이터를 가져오지 못했습니다</h2>
+                <p style="font-size: 1.1rem; line-height: 1.6; margin-bottom: 2rem;">
+                    네트워크 연결에 문제가 있거나, 서버(Render)의 초기 가동 시간이 지연되고 있습니다.<br>
+                    <strong>상세 에러:</strong> ${err.message}
+                </p>
+                <button onclick="location.reload()" style="padding: 12px 30px; background: #ef4444; color: white; border: none; border-radius: 50px; font-weight: 600; cursor: pointer; transition: 0.3s; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);">다시 시도하기</button>
             </div>
         `;
     }
