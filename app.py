@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime
 import time
 
-app = Flask(__name__)
+app = Flask(__name__, static_url_path='', static_folder='.')
 CORS(app)
 
 def calculate_changes(hist, current_close):
