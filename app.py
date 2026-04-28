@@ -8,13 +8,22 @@ import time
 app = Flask(__name__, static_url_path='', static_folder='.')
 CORS(app)
 
+# 글로벌 데이터 캐시 (5분 유효)
+data_cache = {
+    "data": None,
+    "last_updated": 0
+}
+CACHE_DURATION = 300 # 5분
+
 def calculate_changes(hist, current_close):
     try:
         if len(hist) < 2: return {"d1":0, "d3":0, "w1":0, "m1":0, "m3":0, "m6":0, "y1":0}
         
         def get_pct(days_ago):
+            # 영업일 기준 인덱스 추출 (근사치)
             idx = min(days_ago, len(hist)-1)
             old_price = float(hist['Close'].iloc[-1 - idx])
+            if old_price == 0: return 0
             return round(((current_close - old_price) / old_price) * 100, 2)
             
         return {
@@ -26,7 +35,7 @@ def calculate_changes(hist, current_close):
             "m6": get_pct(126),
             "y1": get_pct(252)
         }
-    except Exception as e:
+    except:
         return {"d1":0, "d3":0, "w1":0, "m1":0, "m3":0, "m6":0, "y1":0}
 
 @app.route("/")
@@ -35,6 +44,13 @@ def home():
 
 @app.route('/api/market-data')
 def market_data():
+    global data_cache
+    
+    # 1. 캐시 체크
+    current_time = time.time()
+    if data_cache["data"] and (current_time - data_cache["last_updated"] < CACHE_DURATION):
+        return jsonify(data_cache["data"])
+
     market_tickers = {
         "SPX": "^GSPC", "COMP": "^IXIC", "DJI": "^DJI",
         "KS11": "^KS11", "KQ11": "^KQ11", 
@@ -91,14 +107,49 @@ def market_data():
         {"ticker": "266410.KS", "display": "KODEX 필수소비재", "name": "Cons. Staples", "desc": "필수소비재"}
     ]
     
+    # 티커 목록 통합
     all_tickers = list(market_tickers.values()) + [s["ticker"] for s in us_sectors] + [s["ticker"] for s in kr_sectors]
     for c_list in company_tickers_full.values():
         all_tickers.extend([item[1] for item in c_list])
+    unique_tickers = list(set(all_tickers))
         
     try:
-        data = yf.download(list(set(all_tickers)), period="1y", group_by="ticker", auto_adjust=True, progress=False)
+        # 데이터 다운로드 최적화: 배치 처리 (15개씩 분할 요청)
+        # 기간을 18개월에서 14개월로 단축 (1년치 수익률 계산에 충분함)
+        batch_size = 15
+        data = pd.DataFrame()
         
-        spx_hist = data["^GSPC"].dropna(subset=['Close']) if len(all_tickers) > 1 else data
+        unique_tickers = list(set(all_tickers))
+        for i in range(0, len(unique_tickers), batch_size):
+            batch = unique_tickers[i:i+batch_size]
+            try:
+                # timeout 설정 추가 및 배치별 스레드 활용
+                batch_data = yf.download(batch, period="14mo", group_by="ticker", threads=True, progress=False, timeout=20)
+                if not batch_data.empty:
+                    if data.empty:
+                        data = batch_data
+                    else:
+                        # 중복 컬럼 방지를 위해 이미 있는 컬럼은 제외하고 병합
+                        new_cols = batch_data.columns.levels[0].difference(data.columns.levels[0])
+                        if not new_cols.empty:
+                            data = pd.concat([data, batch_data[new_cols]], axis=1)
+                        else:
+                            # 만약 이미 모든 티커가 있다면 (그럴 리 없지만) pass
+                            pass
+            except Exception as e:
+                print(f"Failed to download batch {batch}: {e}")
+        
+        # 데이터가 아예 없는 경우 대응
+        if data.empty:
+            print("Warning: All ticker downloads failed.")
+            data = pd.DataFrame()
+
+        # 기준일 처리용 (S&P 500 기준)
+        spx_sym = "^GSPC"
+        spx_hist = None
+        if not data.empty and spx_sym in data.columns.levels[0]:
+            spx_hist = data[spx_sym].dropna(subset=['Close'])
+
         def standard_date(days_ago):
             if spx_hist is None or spx_hist.empty: return ""
             idx = min(days_ago, len(spx_hist)-1)
@@ -106,9 +157,11 @@ def market_data():
 
         def process_ticker(t_sym, symbol_type="usd"):
             try:
-                hist = data[t_sym] if len(all_tickers) > 1 else data
-                hist = hist.dropna(subset=['Close'])
-                if hist.empty: raise Exception("No data")
+                if data.empty or t_sym not in data.columns.levels[0]:
+                    return {"value": "N/A", "changes": {"d1":0, "d3":0, "w1":0, "m1":0, "m3":0, "m6":0, "y1":0}}
+                
+                hist = data[t_sym].dropna(subset=['Close'])
+                if hist.empty: return {"value": "N/A", "changes": {"d1":0, "d3":0, "w1":0, "m1":0, "m3":0, "m6":0, "y1":0}}
                 
                 current_close = float(hist['Close'].iloc[-1])
                 
@@ -121,29 +174,25 @@ def market_data():
                     
                 changes = calculate_changes(hist, current_close)
                 return {"value": val_str, "changes": changes}
-            except:
+            except Exception as e:
+                print(f"Error processing {t_sym}: {e}")
                 return {"value": "N/A", "changes": {"d1":0, "d3":0, "w1":0, "m1":0, "m3":0, "m6":0, "y1":0}}
 
-        response = {
+        result = {
             "baseDate": f"{datetime.now().strftime('%Y년 %m월 %d일 %H:%M')} 라이브 API 기준",
             "dates": {
                 "current": standard_date(0) if standard_date(0) else "현재가",
-                "d1": f"{standard_date(1)}",
-                "d3": f"{standard_date(3)}",
-                "w1": f"{standard_date(5)}",
-                "m1": f"{standard_date(21)}",
-                "m3": f"{standard_date(63)}",
-                "m6": f"{standard_date(126)}",
-                "y1": f"{standard_date(252)}"
+                "d1": f"{standard_date(1)}", "d3": f"{standard_date(3)}", "w1": f"{standard_date(5)}",
+                "m1": f"{standard_date(21)}", "m3": f"{standard_date(63)}", "m6": f"{standard_date(126)}", "y1": f"{standard_date(252)}"
             },
             "markets": [
-                { "name": "S&P 500", "region": "미국", "ticker": "SPX", "yahoo_ticker": market_tickers["SPX"], **process_ticker(market_tickers["SPX"], "idx") },
-                { "name": "NASDAQ", "region": "미국", "ticker": "COMP", "yahoo_ticker": market_tickers["COMP"], **process_ticker(market_tickers["COMP"], "idx") },
-                { "name": "Dow Jones", "region": "미국", "ticker": "DJI", "yahoo_ticker": market_tickers["DJI"], **process_ticker(market_tickers["DJI"], "idx") },
-                { "name": "KOSPI", "region": "한국", "ticker": "KS11", "yahoo_ticker": market_tickers["KS11"], **process_ticker(market_tickers["KS11"], "idx") },
-                { "name": "KOSDAQ", "region": "한국", "ticker": "KQ11", "yahoo_ticker": market_tickers["KQ11"], **process_ticker(market_tickers["KQ11"], "idx") },
-                { "name": "Nikkei 225", "region": "일본", "ticker": "N225", "yahoo_ticker": market_tickers["N225"], **process_ticker(market_tickers["N225"], "idx") },
-                { "name": "Shanghai Comp", "region": "중국", "ticker": "SSEC", "yahoo_ticker": market_tickers["SSEC"], **process_ticker(market_tickers["SSEC"], "idx") }
+                { "name": "S&P 500", "region": "미국", "ticker": "SPX", "yahoo_ticker": "^GSPC", **process_ticker("^GSPC", "idx") },
+                { "name": "NASDAQ", "region": "미국", "ticker": "COMP", "yahoo_ticker": "^IXIC", **process_ticker("^IXIC", "idx") },
+                { "name": "Dow Jones", "region": "미국", "ticker": "DJI", "yahoo_ticker": "^DJI", **process_ticker("^DJI", "idx") },
+                { "name": "KOSPI", "region": "한국", "ticker": "KS11", "yahoo_ticker": "^KS11", **process_ticker("^KS11", "idx") },
+                { "name": "KOSDAQ", "region": "한국", "ticker": "KQ11", "yahoo_ticker": "^KQ11", **process_ticker("^KQ11", "idx") },
+                { "name": "Nikkei 225", "region": "일본", "ticker": "N225", "yahoo_ticker": "^N225", **process_ticker("^N225", "idx") },
+                { "name": "Shanghai Comp", "region": "중국", "ticker": "SSEC", "yahoo_ticker": "000001.SS", **process_ticker("000001.SS", "idx") }
             ],
             "usSectors": [{"ticker": s["ticker"], "yahoo_ticker": s["ticker"], "name": s["name"], "desc": s["desc"], **process_ticker(s["ticker"], "usd")} for s in us_sectors],
             "krSectors": [{"ticker": s["display"], "yahoo_ticker": s["ticker"], "name": s["name"], "desc": s["desc"], **process_ticker(s["ticker"], "krw")} for s in kr_sectors],
@@ -165,7 +214,7 @@ def market_data():
                 { "title": "중국발 강력한 부양책 발표 임박... 아시아 신흥국 증시 동반 강세 흐름", "summary": "중앙은행의 추가적인 지준율 인하 소문이 돌면서 SSEC 중심의 대규모 자금 투입이 예상됩니다.", "source": "South China Morning Post", "date": "2026.04.26", "time": "2일 전", "link": "https://finance.yahoo.com/quote/000001.SS", "image": "https://images.unsplash.com/photo-1541888035777-17e92ce1ab52?w=400&q=80" },
                 { "title": "비트코인 등 가상자산과 매그니피센트7 주가의 상관관계 역대 최고치 기록", "summary": "리스크-온 자산으로 취급되는 암호화폐와 빅테크의 움직임이 강력히 동기화 되고 있습니다.", "source": "CNBC", "date": "2026.04.26", "time": "2일 전", "link": "https://finance.yahoo.com/quote/BTC-USD", "image": "https://images.unsplash.com/photo-1516245834210-c4c142787335?w=400&q=80" },
                 { "title": "글로벌 상업용 부동산 위기 진정세, 리츠(REITs)ETF 반발 매수 폭발", "summary": "미국 오피스 공실률이 안정화 사이클에 진입하며 금융권 내 부실 자산 우려가 씻겨나갔습니다.", "source": "Reuters", "date": "2026.04.25", "time": "3일 전", "link": "https://finance.yahoo.com/quote/VNQ", "image": "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=400&q=80" },
-                { "title": "차세대 로봇 공학 및 헬스케어 AI 접목 신규 스타트업들의 IPO 광풍", "summary": "제 2의 닷컴버블을 연상케 할 만큼 딥테크 기업들의 상장이 월가를 휩쓸고 있습니다.", "source": "TechCrunch", "date": "2026.04.24", "time": "4일 전", "link": "https://finance.yahoo.com/news/", "image": "https://images.unsplash.com/photo-1531746790731-6c087fecd65a?w=400&q=80" },
+                { "title": "차세대 로봇 공학 및 헬스케어 AI 접목 신규 스타트업들의 IPO 광풍", "summary": "제 2의 닷컴버블을 연상케 할 만큼 딥테크 기업들의 상장이 월가를 휩숫고 있습니다.", "source": "TechCrunch", "date": "2026.04.24", "time": "4일 전", "link": "https://finance.yahoo.com/news/", "image": "https://images.unsplash.com/photo-1531746790731-6c087fecd65a?w=400&q=80" },
                 { "title": "주요 기업들의 막대한 잉여현금흐름, 대규모 자사주 매입과 배당 폭탄 선언", "summary": "어닝 서프라이즈를 달성한 주요 대기업들이 앞다투어 막강한 주주환원 패키지를 시장에 던지고 있습니다.", "source": "Yahoo Finance", "date": "2026.04.23", "time": "5일 전", "link": "https://finance.yahoo.com/news/", "image": "https://images.unsplash.com/photo-1591696205602-2f950c417cb9?w=400&q=80" }
             ],
             "quotes": [
@@ -245,7 +294,12 @@ def market_data():
                 }
             ]
         }
-        return jsonify(response)
+        
+        # 2. 캐시 업데이트
+        data_cache["data"] = result
+        data_cache["last_updated"] = time.time()
+        
+        return jsonify(result)
     except Exception as e:
         print(f"Error: {e}")
         return jsonify({"error": str(e)}), 500
