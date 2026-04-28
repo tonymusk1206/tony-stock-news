@@ -17,26 +17,26 @@ CACHE_DURATION = 300 # 5분
 
 def calculate_changes(hist, current_close):
     try:
-        if len(hist) < 2: return {"d1":0, "d3":0, "w1":0, "m1":0, "m3":0, "m6":0, "y1":0}
+        if len(hist) < 2: return {k: {"pct": 0, "raw_price": 0} for k in ["d1", "d3", "w1", "m1", "m3", "m6", "y1"]}
         
-        def get_pct(days_ago):
-            # 영업일 기준 인덱스 추출 (근사치)
+        def get_data(days_ago):
             idx = min(days_ago, len(hist)-1)
             old_price = float(hist['Close'].iloc[-1 - idx])
-            if old_price == 0: return 0
-            return round(((current_close - old_price) / old_price) * 100, 2)
+            if old_price == 0: return {"pct": 0, "raw_price": 0}
+            pct = round(((current_close - old_price) / old_price) * 100, 2)
+            return {"pct": pct, "raw_price": old_price}
             
         return {
-            "d1": get_pct(1),
-            "d3": get_pct(3),
-            "w1": get_pct(5),
-            "m1": get_pct(21),
-            "m3": get_pct(63), 
-            "m6": get_pct(126),
-            "y1": get_pct(252)
+            "d1": get_data(1),
+            "d3": get_data(3),
+            "w1": get_data(5),
+            "m1": get_data(21),
+            "m3": get_data(63), 
+            "m6": get_data(126),
+            "y1": get_data(252)
         }
     except:
-        return {"d1":0, "d3":0, "w1":0, "m1":0, "m3":0, "m6":0, "y1":0}
+        return {k: {"pct": 0, "raw_price": 0} for k in ["d1", "d3", "w1", "m1", "m3", "m6", "y1"]}
 
 @app.route("/")
 def home():
@@ -156,27 +156,40 @@ def market_data():
             return spx_hist.index[-1 - idx].strftime('%y.%m.%d')
 
         def process_ticker(t_sym, symbol_type="usd"):
+            empty_changes = {k: {"pct": 0, "price": "N/A"} for k in ["d1", "d3", "w1", "m1", "m3", "m6", "y1"]}
             try:
                 if data.empty or t_sym not in data.columns.levels[0]:
-                    return {"value": "N/A", "changes": {"d1":0, "d3":0, "w1":0, "m1":0, "m3":0, "m6":0, "y1":0}}
+                    return {"value": "N/A", "changes": empty_changes}
                 
                 hist = data[t_sym].dropna(subset=['Close'])
-                if hist.empty: return {"value": "N/A", "changes": {"d1":0, "d3":0, "w1":0, "m1":0, "m3":0, "m6":0, "y1":0}}
+                if hist.empty: return {"value": "N/A", "changes": empty_changes}
                 
                 current_close = float(hist['Close'].iloc[-1])
                 
-                if symbol_type == "krw" or t_sym.endswith(".KS") or t_sym.endswith(".KQ"):
-                    val_str = f"₩{current_close:,.0f}"
-                elif symbol_type == "idx":
-                    val_str = f"{current_close:,.2f}"
-                else:
-                    val_str = f"${current_close:,.2f}"
+                def format_price(p):
+                    if p == "N/A" or p == 0: return "N/A"
+                    if symbol_type == "krw" or t_sym.endswith(".KS") or t_sym.endswith(".KQ"):
+                        return f"₩{p:,.0f}"
+                    elif symbol_type == "idx":
+                        return f"{p:,.2f}"
+                    else:
+                        return f"${p:,.2f}"
+
+                val_str = format_price(current_close)
                     
-                changes = calculate_changes(hist, current_close)
-                return {"value": val_str, "changes": changes}
+                raw_changes = calculate_changes(hist, current_close)
+                # 당시 주가 데이터를 포맷팅하여 포함
+                formatted_changes = {}
+                for k, v in raw_changes.items():
+                    formatted_changes[k] = {
+                        "pct": v["pct"],
+                        "price": format_price(v["raw_price"])
+                    }
+                
+                return {"value": val_str, "changes": formatted_changes}
             except Exception as e:
                 print(f"Error processing {t_sym}: {e}")
-                return {"value": "N/A", "changes": {"d1":0, "d3":0, "w1":0, "m1":0, "m3":0, "m6":0, "y1":0}}
+                return {"value": "N/A", "changes": empty_changes}
 
         result = {
             "baseDate": f"{datetime.now().strftime('%Y년 %m월 %d일 %H:%M')} 라이브 API 기준",

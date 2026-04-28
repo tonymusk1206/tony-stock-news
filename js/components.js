@@ -1,11 +1,21 @@
 // 공통 유틸리티
-function formatPercent(value) {
-    if (value > 0) return `<span class="val-up">▲ ${value.toFixed(1)}%</span>`;
-    if (value < 0) return `<span class="val-down">▼ ${Math.abs(value).toFixed(1)}%</span>`;
-    return `<span class="val-neutral">- ${value.toFixed(1)}%</span>`;
+function formatPercent(data) {
+    const value = data.pct;
+    const price = data.price;
+    let html = '';
+    
+    if (value > 0) html = `<span class="val-up">▲ ${value.toFixed(1)}%</span>`;
+    else if (value < 0) html = `<span class="val-down">▼ ${Math.abs(value).toFixed(1)}%</span>`;
+    else html = `<span class="val-neutral">- ${value.toFixed(1)}%</span>`;
+    
+    if (price && price !== 'N/A') {
+        html += `<div class="hist-price" style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 400; margin-top: 2px;">${price}</div>`;
+    }
+    return html;
 }
 
-function getPercentClass(value) {
+function getPercentClass(data) {
+    const value = typeof data === 'object' ? data.pct : data;
     if (value > 0) return 'val-up';
     if (value < 0) return 'val-down';
     return 'val-neutral';
@@ -13,6 +23,14 @@ function getPercentClass(value) {
 
 function createMarketCard(market) {
     if (!mockData) return '';
+    const renderMetric = (label, date, change) => `
+        <div class="metric-box">
+            <span class="metric-label">${label}<br/>(${date})</span>
+            <span class="metric-value ${getPercentClass(change)}">${change.pct > 0 ? '+' : ''}${change.pct}%</span>
+            <span class="metric-hist-price" style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 2px;">${change.price}</span>
+        </div>
+    `;
+
     return `
         <div class="glass-card" onclick="window.open('https://finance.yahoo.com/quote/' + '${market.yahoo_ticker}', '_blank')" style="cursor: pointer; transition: transform 0.2s, background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background=''">
             <div class="c-name" style="margin-bottom: 8px; display: flex; justify-content: space-between;">
@@ -25,34 +43,13 @@ function createMarketCard(market) {
                     <span class="metric-label">현재가<br/>(${mockData.dates.current})</span>
                     <span class="metric-value" style="color: #fff;">${market.value}</span>
                 </div>
-                <div class="metric-box">
-                    <span class="metric-label">1일전<br/>(${mockData.dates.d1})</span>
-                    <span class="metric-value ${getPercentClass(market.changes.d1)}">${market.changes.d1 > 0 ? '+' : ''}${market.changes.d1}%</span>
-                </div>
-                <div class="metric-box">
-                    <span class="metric-label">3일전<br/>(${mockData.dates.d3})</span>
-                    <span class="metric-value ${getPercentClass(market.changes.d3)}">${market.changes.d3 > 0 ? '+' : ''}${market.changes.d3}%</span>
-                </div>
-                <div class="metric-box">
-                    <span class="metric-label">1주전<br/>(${mockData.dates.w1})</span>
-                    <span class="metric-value ${getPercentClass(market.changes.w1)}">${market.changes.w1 > 0 ? '+' : ''}${market.changes.w1}%</span>
-                </div>
-                <div class="metric-box">
-                    <span class="metric-label">1달전<br/>(${mockData.dates.m1})</span>
-                    <span class="metric-value ${getPercentClass(market.changes.m1)}">${market.changes.m1 > 0 ? '+' : ''}${market.changes.m1}%</span>
-                </div>
-                <div class="metric-box">
-                    <span class="metric-label">3달전<br/>(${mockData.dates.m3})</span>
-                    <span class="metric-value ${getPercentClass(market.changes.m3)}">${market.changes.m3 > 0 ? '+' : ''}${market.changes.m3}%</span>
-                </div>
-                <div class="metric-box">
-                    <span class="metric-label">6달전<br/>(${mockData.dates.m6})</span>
-                    <span class="metric-value ${getPercentClass(market.changes.m6)}">${market.changes.m6 > 0 ? '+' : ''}${market.changes.m6}%</span>
-                </div>
-                <div class="metric-box">
-                    <span class="metric-label">1년전<br/>(${mockData.dates.y1})</span>
-                    <span class="metric-value ${getPercentClass(market.changes.y1)}">${market.changes.y1 > 0 ? '+' : ''}${market.changes.y1}%</span>
-                </div>
+                ${renderMetric('1일전', mockData.dates.d1, market.changes.d1)}
+                ${renderMetric('3일전', mockData.dates.d3, market.changes.d3)}
+                ${renderMetric('1주전', mockData.dates.w1, market.changes.w1)}
+                ${renderMetric('1달전', mockData.dates.m1, market.changes.m1)}
+                ${renderMetric('3달전', mockData.dates.m3, market.changes.m3)}
+                ${renderMetric('6달전', mockData.dates.m6, market.changes.m6)}
+                ${renderMetric('1년전', mockData.dates.y1, market.changes.y1)}
             </div>
         </div>
     `;
@@ -148,6 +145,14 @@ function renderSectors() {
 }
 
 function createCompanyCard(company) {
+    const renderMetric = (label, date, change) => `
+        <div class="metric-box">
+            <span class="metric-label">${label}<br/>(${date})</span>
+            <span class="metric-value ${getPercentClass(change)}">${change.pct > 0 ? '+' : ''}${change.pct}%</span>
+            <span class="metric-hist-price" style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 2px;">${change.price}</span>
+        </div>
+    `;
+
     return `
         <div class="glass-card company-card" onclick="window.open('https://finance.yahoo.com/quote/' + '${company.yahoo_ticker}', '_blank')" style="cursor: pointer; transition: transform 0.2s, background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background=''">
             <div class="company-header" style="align-items: center; margin-bottom: 12px;">
@@ -165,34 +170,13 @@ function createCompanyCard(company) {
                     <span class="metric-label">현재 주가<br/>(${mockData.dates.current})</span>
                     <span class="metric-value" style="color: #fff;">${company.value}</span>
                 </div>
-                <div class="metric-box">
-                    <span class="metric-label">1일전<br/>(${mockData.dates.d1})</span>
-                    <span class="metric-value ${getPercentClass(company.changes.d1)}">${company.changes.d1 > 0 ? '+' : ''}${company.changes.d1}%</span>
-                </div>
-                <div class="metric-box">
-                    <span class="metric-label">3일전<br/>(${mockData.dates.d3})</span>
-                    <span class="metric-value ${getPercentClass(company.changes.d3)}">${company.changes.d3 > 0 ? '+' : ''}${company.changes.d3}%</span>
-                </div>
-                <div class="metric-box">
-                    <span class="metric-label">1주전<br/>(${mockData.dates.w1})</span>
-                    <span class="metric-value ${getPercentClass(company.changes.w1)}">${company.changes.w1 > 0 ? '+' : ''}${company.changes.w1}%</span>
-                </div>
-                <div class="metric-box">
-                    <span class="metric-label">1개월전<br/>(${mockData.dates.m1})</span>
-                    <span class="metric-value ${getPercentClass(company.changes.m1)}">${company.changes.m1 > 0 ? '+' : ''}${company.changes.m1}%</span>
-                </div>
-                <div class="metric-box">
-                    <span class="metric-label">3개월전<br/>(${mockData.dates.m3})</span>
-                    <span class="metric-value ${getPercentClass(company.changes.m3)}">${company.changes.m3 > 0 ? '+' : ''}${company.changes.m3}%</span>
-                </div>
-                <div class="metric-box">
-                    <span class="metric-label">6개월전<br/>(${mockData.dates.m6})</span>
-                    <span class="metric-value ${getPercentClass(company.changes.m6)}">${company.changes.m6 > 0 ? '+' : ''}${company.changes.m6}%</span>
-                </div>
-                <div class="metric-box">
-                    <span class="metric-label">1년전<br/>(${mockData.dates.y1})</span>
-                    <span class="metric-value ${getPercentClass(company.changes.y1)}">${company.changes.y1 > 0 ? '+' : ''}${company.changes.y1}%</span>
-                </div>
+                ${renderMetric('1일전', mockData.dates.d1, company.changes.d1)}
+                ${renderMetric('3일전', mockData.dates.d3, company.changes.d3)}
+                ${renderMetric('1주전', mockData.dates.w1, company.changes.w1)}
+                ${renderMetric('1개월전', mockData.dates.m1, company.changes.m1)}
+                ${renderMetric('3개월전', mockData.dates.m3, company.changes.m3)}
+                ${renderMetric('6개월전', mockData.dates.m6, company.changes.m6)}
+                ${renderMetric('1년전', mockData.dates.y1, company.changes.y1)}
             </div>
         </div>
     `;
