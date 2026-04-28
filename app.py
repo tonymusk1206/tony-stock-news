@@ -27,6 +27,7 @@ def calculate_changes(hist, current_close):
             return {"pct": pct, "raw_price": old_price}
             
         return {
+            "today": get_data(1),
             "d1": get_data(1),
             "d3": get_data(3),
             "w1": get_data(5),
@@ -36,7 +37,7 @@ def calculate_changes(hist, current_close):
             "y1": get_data(252)
         }
     except:
-        return {k: {"pct": 0, "raw_price": 0} for k in ["d1", "d3", "w1", "m1", "m3", "m6", "y1"]}
+        return {k: {"pct": 0, "raw_price": 0} for k in ["today", "d1", "d3", "w1", "m1", "m3", "m6", "y1"]}
 
 @app.route("/")
 def home():
@@ -156,7 +157,7 @@ def market_data():
             return spx_hist.index[-1 - idx].strftime('%y.%m.%d')
 
         def process_ticker(t_sym, symbol_type="usd"):
-            empty_changes = {k: {"pct": 0, "price": "N/A"} for k in ["d1", "d3", "w1", "m1", "m3", "m6", "y1"]}
+            empty_changes = {k: {"pct": 0, "price": "N/A"} for k in ["today", "d1", "d3", "w1", "m1", "m3", "m6", "y1"]}
             try:
                 if data.empty or t_sym not in data.columns.levels[0]:
                     return {"value": "N/A", "changes": empty_changes}
