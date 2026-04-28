@@ -111,7 +111,10 @@ function createSectorTableHTML(sectors) {
                 <div class="ticker-name">${sector.name} <span style="font-size: 0.85em; font-weight: normal; color: var(--text-secondary);">(${sector.desc})</span></div>
                 <span class="ticker-desc" style="display: block; margin-top: 4px; color: var(--text-muted); font-size: 0.8em; font-weight: 500;">(${sector.ticker})</span>
             </td>
-            <td style="font-weight: 600;">${sector.value}</td>
+            <td style="font-weight: 600;">
+                <div style="font-size: 1rem; margin-bottom: 4px;">${sector.value}</div>
+                <div style="font-weight: 500;">${formatPercent(sector.changes.today)}</div>
+            </td>
             <td>${formatPercent(sector.changes.d1)}</td>
             <td>${formatPercent(sector.changes.d3)}</td>
             <td>${formatPercent(sector.changes.w1)}</td>
